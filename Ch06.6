@@ -1,0 +1,81 @@
+Outcomes
+
+Manually delete unused images from the nodes.
+
+Automate the image pruning by using a cron job.
+
+
+0. Prepare the lab.
+
+$ lab start appsec-prune && \
+  oc login -u admin -p redhatocp \
+  https://api.ocp4.example.com:6443 && \
+  oc new-project appsec-prune && \
+  cd ~/DO280/labs/appsec-prune
+
+
+1. Start by manually cleaning up the unused container images in the node.
+
+Remove the unused images in the node
+
+$ oc get deployments -n prune-apps -o wide
+
+$ oc debug node/master01
+    # chroot /host 
+    # crictl images | egrep '^IMAGE|httpd|nginx'
+    # crictl rmi --prune
+
+Delete the deployments that use the nginx images
+
+$ oc delete deployment nginx-ubi{7,8,9} -n prune-apps
+
+
+
+2. Create a cron job to automate the image pruning process.
+
+Start by creating the ConfigMap
+
+$ less ~/DO280/solutions/appsec-prune/configmap-prune.yaml
+
+$ oc apply -f ~/DO280/solutions/appsec-prune/configmap-prune.yaml 
+
+
+Create the image pruner resource
+
+$ less ~/DO280/solutions/appsec-prune/cronjob-prune.yaml
+
+$ oc apply -f ~/DO280/solutions/appsec-prune/cronjob-prune.yaml
+
+$ watch oc get cronjobs,jobs,pods
+
+
+If you try to get the pod logs, you'll get an error. That's because the pod is run with the default service account and you need to provide it with appropriate privileges.
+
+$ oc logs pod/image-pruner-27950092-g76lb
+Error from server (Forbidden): nodes is forbidden: User "system:serviceaccount:appsec-prune:default" cannot list resource "nodes" in API group "" at the cluster scope
+
+$ oc delete cronjob/image-pruner
+
+$ oc adm policy add-scc-to-user -z default privileged
+
+$ oc adm policy add-cluster-role-to-user \
+  cluster-admin -z default
+
+$ oc apply -f cronjob-prune.yaml
+
+$ watch oc get cronjobs,jobs,pods
+
+$ oc logs pod/image-pruner-27883660-2ghvv | tail
+
+
+
+00. Clean up resources.
+
+$ cd ~ && oc project && \
+  oc delete cronjob/image-pruner configmap/maintenance && \
+  oc adm policy remove-scc-from-user \
+  -z default privileged \
+  oc adm policy remove-cluster-role-from-user \
+  cluster-admin -z default && \
+  oc delete project appsec-prune prune-apps && \
+  lab finish appsec-prune
